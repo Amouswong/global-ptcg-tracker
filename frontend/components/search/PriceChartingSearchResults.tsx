@@ -204,7 +204,7 @@ export function PriceChartingSearchResults({ data, loading, error }: Props) {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <label className="text-sm font-medium">Language</label>
-                <Select value={selectedLanguage} onValueChange={setSelectedLanguage}>
+                <Select value={selectedLanguage} onValueChange={(v) => v != null && setSelectedLanguage(v)}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select language" />
                   </SelectTrigger>
@@ -220,7 +220,7 @@ export function PriceChartingSearchResults({ data, loading, error }: Props) {
 
               <div className="space-y-2">
                 <label className="text-sm font-medium">Grade</label>
-                <Select value={selectedGrade} onValueChange={setSelectedGrade}>
+                <Select value={selectedGrade} onValueChange={(v) => v != null && setSelectedGrade(v)}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select grade" />
                   </SelectTrigger>
