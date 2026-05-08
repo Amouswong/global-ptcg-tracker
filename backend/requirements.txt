@@ -11,3 +11,4 @@ imagehash==4.3.2
 Pillow>=11.1.0
 python-multipart==0.0.20
 beautifulsoup4==4.12.3
+aiosqlite==0.20.0
