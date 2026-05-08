@@ -9,12 +9,15 @@ Results feed directly into the PriceCharting scraper.
 import asyncio
 import base64
 import json
+import logging
 import re
 from typing import Any
 
 import httpx
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 _FLASH_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models"
@@ -158,17 +161,23 @@ async def _call_gemini(
                     if attempt < max_retries - 1:
                         await asyncio.sleep(2 ** attempt)
                         continue
+                    logger.error("Gemini 503 after retries: %s", url)
                     return None, False
+                if not resp.is_success:
+                    logger.error("Gemini HTTP %s: %s", resp.status_code, resp.text[:500])
+                    resp.raise_for_status()
                 resp.raise_for_status()
             data = resp.json()
             # Check for API-level error in response body
             if "error" in data:
+                logger.error("Gemini API error: %s", data["error"])
                 if data["error"].get("code") == 503 and attempt < max_retries - 1:
                     await asyncio.sleep(2 ** attempt)
                     continue
                 return None, False
             candidates = data.get("candidates", [])
             if not candidates:
+                logger.warning("Gemini returned no candidates. promptFeedback: %s", data.get("promptFeedback"))
                 return None, False
             candidate = candidates[0]
             truncated = candidate.get("finishReason") == "MAX_TOKENS"
@@ -179,11 +188,11 @@ async def _call_gemini(
             text = _strip_fences(text)
             try:
                 return json.loads(text), truncated
-            except json.JSONDecodeError:
-                # If JSON parse fails and output was truncated, return None with truncated=True
-                # so caller can retry with Pro or split the image
+            except json.JSONDecodeError as e:
+                logger.error("Gemini JSON parse error: %s | text: %s", e, text[:300])
                 return None, truncated
-        except Exception:
+        except Exception as e:
+            logger.error("Gemini call exception (attempt %s): %s", attempt, e)
             if attempt < max_retries - 1:
                 await asyncio.sleep(2 ** attempt)
                 continue
