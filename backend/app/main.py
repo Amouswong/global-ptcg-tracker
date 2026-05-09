@@ -50,3 +50,17 @@ app.include_router(tracking_router, prefix="/api/v1")
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/debug/gemini")
+async def debug_gemini():
+    import httpx
+    from app.config import settings
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+    payload = {
+        "contents": [{"parts": [{"text": "Say hello"}]}],
+        "generationConfig": {"maxOutputTokens": 10},
+    }
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(url, params={"key": settings.gemini_api_key}, json=payload)
+    return {"status": resp.status_code, "body": resp.json(), "key_prefix": settings.gemini_api_key[:10]}
