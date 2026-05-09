@@ -20,11 +20,11 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 _FLASH_URL = (
-    "https://generativelanguage.googleapis.com/v1beta/models"
+    "https://generativelanguage.googleapis.com/v1/models"
     "/gemini-2.0-flash:generateContent"
 )
 _PRO_URL = (
-    "https://generativelanguage.googleapis.com/v1beta/models"
+    "https://generativelanguage.googleapis.com/v1/models"
     "/gemini-2.0-flash:generateContent"
 )
 
