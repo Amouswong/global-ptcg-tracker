@@ -56,7 +56,7 @@ async def health():
 async def debug_gemini():
     import httpx
     from app.config import settings
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
     payload = {
         "contents": [{"parts": [{"text": "Say hello"}]}],
         "generationConfig": {"maxOutputTokens": 10},
