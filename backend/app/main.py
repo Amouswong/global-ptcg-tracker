@@ -12,12 +12,30 @@ from app.routers.search import router as search_router
 from app.routers.tracking import router as tracking_router
 
 
+async def _migrate(conn):
+    from app.database import Base
+    await conn.run_sync(Base.metadata.create_all)
+    # Add sneakdunk columns if they don't exist (for existing deployments)
+    new_columns = [
+        ("sneakdunk_url", "TEXT"),
+        ("sneakdunk_lowest_ask_jpy", "FLOAT"),
+        ("sneakdunk_lowest_ask_hkd", "FLOAT"),
+        ("sneakdunk_market_price_jpy", "FLOAT"),
+        ("sneakdunk_market_price_hkd", "FLOAT"),
+    ]
+    for col, col_type in new_columns:
+        await conn.execute(
+            __import__("sqlalchemy").text(
+                f"ALTER TABLE scan_history ADD COLUMN IF NOT EXISTS {col} {col_type}"
+            )
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_redis()
     async with engine.begin() as conn:
-        from app.database import Base
-        await conn.run_sync(Base.metadata.create_all)
+        await _migrate(conn)
     yield
     await close_redis()
     await engine.dispose()
