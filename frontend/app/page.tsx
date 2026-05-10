@@ -65,6 +65,12 @@ export default function HomePage() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
+  // Wake up Render free instance on page load
+  useEffect(() => {
+    const base = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+    fetch(`${base}/health`).catch(() => {});
+  }, []);
+
   const queue = useIdentifyQueue();
   const { scan, result: scanResult, loading: scanLoading, stage: scanStage, error: scanError, reset: scanReset } = useScan();
 
