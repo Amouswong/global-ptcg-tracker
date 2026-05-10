@@ -253,6 +253,33 @@ async def backfill_sneakdunk(db: AsyncSession = Depends(get_db)):
     return {"updated": updated, "total": len(rows)}
 
 
+class SneakdunkUpdateRequest(BaseModel):
+    sneakdunk_url: str | None = None
+    sneakdunk_lowest_ask_jpy: float | None = None
+    sneakdunk_lowest_ask_hkd: float | None = None
+
+
+@router.patch("/{record_id}/sneakdunk")
+async def update_sneakdunk(
+    record_id: str,
+    req: SneakdunkUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Manually set Sneakdunk URL and price for a history record."""
+    result = await db.execute(select(ScanHistory).where(ScanHistory.id == record_id))
+    record = result.scalar_one_or_none()
+    if record is None:
+        raise HTTPException(status_code=404, detail="Record not found")
+    record.sneakdunk_url = req.sneakdunk_url
+    record.sneakdunk_lowest_ask_jpy = req.sneakdunk_lowest_ask_jpy
+    if req.sneakdunk_lowest_ask_hkd is not None:
+        record.sneakdunk_lowest_ask_hkd = req.sneakdunk_lowest_ask_hkd
+    elif req.sneakdunk_lowest_ask_jpy is not None:
+        record.sneakdunk_lowest_ask_hkd = round(req.sneakdunk_lowest_ask_jpy * 0.052, 1)
+    await db.commit()
+    return {"updated": record_id}
+
+
 @router.delete("/{record_id}")
 async def delete_history_record(
     record_id: str,

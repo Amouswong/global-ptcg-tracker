@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Loader2, Trash2, ArrowLeft, Calendar, ExternalLink, Package, ChevronDown, ChevronUp, GripVertical, X } from "lucide-react";
+import { Loader2, Trash2, ArrowLeft, Calendar, ExternalLink, Package, ChevronDown, ChevronUp, GripVertical, X, Pencil, Folder, FolderPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import Link from "next/link";
@@ -9,6 +9,14 @@ import Link from "next/link";
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 const BIDDING_PRICES_KEY = "ptcg-bidding-prices";
 const BUNDLES_KEY = "ptcg-bundles";
+const FOLDERS_KEY = "ptcg-folders";
+const FOLDER_ITEMS_KEY = "ptcg-folder-items";
+
+interface CardFolder {
+  id: string;
+  name: string;
+  createdAt: string;
+}
 
 interface HistoryItem {
   id: string;
@@ -85,7 +93,79 @@ function priceLabel(item: HistoryItem): string | null {
   return m != null ? `HK$${m.toLocaleString()}` : null;
 }
 
-// ── Draggable card tile (desktop) ────────────────────────────────────────────
+// ── Sneakdunk edit dialog ─────────────────────────────────────────────────────
+
+function SneakdunkEditDialog({
+  item,
+  onClose,
+  onSaved,
+}: {
+  item: HistoryItem;
+  onClose: () => void;
+  onSaved: (updated: Partial<HistoryItem>) => void;
+}) {
+  const [url, setUrl] = useState(item.sneakdunk_url ?? "");
+  const [jpy, setJpy] = useState(item.sneakdunk_lowest_ask_jpy != null ? String(item.sneakdunk_lowest_ask_jpy) : "");
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    setSaving(true);
+    const jpyNum = jpy ? parseFloat(jpy) : null;
+    try {
+      const resp = await fetch(`${API_BASE}/api/v1/history/${item.id}/sneakdunk`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sneakdunk_url: url || null,
+          sneakdunk_lowest_ask_jpy: jpyNum,
+          sneakdunk_lowest_ask_hkd: jpyNum != null ? Math.round(jpyNum * 0.052 * 10) / 10 : null,
+        }),
+      });
+      if (!resp.ok) throw new Error("Save failed");
+      onSaved({
+        sneakdunk_url: url || null,
+        sneakdunk_lowest_ask_jpy: jpyNum,
+        sneakdunk_lowest_ask_hkd: jpyNum != null ? Math.round(jpyNum * 0.052 * 10) / 10 : null,
+      });
+      onClose();
+    } catch {
+      alert("Failed to save Sneakdunk info");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div className="bg-card border rounded-xl p-5 w-full max-w-sm space-y-4 shadow-xl" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <p className="font-semibold text-sm">Edit Sneakdunk info</p>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+        </div>
+        <p className="text-xs text-muted-foreground truncate">{item.name_en}</p>
+        <div className="space-y-2">
+          <label className="text-xs text-muted-foreground">Sneakdunk URL</label>
+          <Input placeholder="https://snkrdunk.com/apparels/..." value={url} onChange={e => setUrl(e.target.value)} className="text-xs h-8" />
+        </div>
+        <div className="space-y-2">
+          <label className="text-xs text-muted-foreground">Lowest ask (JPY ¥)</label>
+          <Input type="number" placeholder="e.g. 15000" value={jpy} onChange={e => setJpy(e.target.value)} className="text-xs h-8" />
+          {jpy && !isNaN(parseFloat(jpy)) && (
+            <p className="text-xs text-orange-400">≈ HK${Math.round(parseFloat(jpy) * 0.052 * 10) / 10}</p>
+          )}
+        </div>
+        <div className="flex gap-2 pt-1">
+          <Button size="sm" onClick={save} disabled={saving} className="flex-1">
+            {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : "Save"}
+          </Button>
+          <Button size="sm" variant="outline" onClick={onClose} className="flex-1">Cancel</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Draggable card tile (desktop) ─────────────────────────────────────────────
 
 function CardTile({
   item,
@@ -101,6 +181,7 @@ function CardTile({
   isDragging,
   inBundle,
   allocatedCost,
+  onEdit,
 }: {
   item: HistoryItem;
   onDelete: (id: string) => void;
@@ -115,6 +196,7 @@ function CardTile({
   isDragging: boolean;
   inBundle?: boolean;
   allocatedCost?: number | null;
+  onEdit?: (item: HistoryItem) => void;
 }) {
   const gradedLabel = item.grade_company && item.grade_value
     ? `${item.grade_company} ${item.grade_value}` : null;
@@ -157,6 +239,12 @@ function CardTile({
           className="absolute top-2 right-2 bg-black/60 hover:bg-destructive/80 text-white rounded p-1 transition-colors">
           {deleting === item.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
         </button>
+        {onEdit && (
+          <button onClick={(e) => { e.preventDefault(); onEdit(item); }}
+            className="absolute top-2 right-9 bg-black/60 hover:bg-primary/80 text-white rounded p-1 transition-colors">
+            <Pencil className="h-3 w-3" />
+          </button>
+        )}
       </a>
 
       <div className="flex flex-col flex-1 p-3 gap-2">
@@ -248,6 +336,7 @@ function MobileCardRowWithBid({
   menuOpen,
   onOpenMenu,
   onCloseMenu,
+  onEdit,
 }: {
   item: HistoryItem;
   onDelete: (id: string) => void;
@@ -259,6 +348,7 @@ function MobileCardRowWithBid({
   menuOpen: boolean;
   onOpenMenu: (id: string) => void;
   onCloseMenu: () => void;
+  onEdit?: (item: HistoryItem) => void;
 }) {
   const [bidOpen, setBidOpen] = useState(false);
   const gradedLabel = item.grade_company && item.grade_value
@@ -317,16 +407,23 @@ function MobileCardRowWithBid({
 
         {/* Actions */}
         <div className="flex flex-col items-end gap-2 shrink-0">
-          <button
-            onClick={() => onDelete(item.id)}
-            disabled={deleting === item.id}
-            className="text-muted-foreground hover:text-destructive transition-colors p-1"
-          >
-            {deleting === item.id
-              ? <Loader2 className="h-4 w-4 animate-spin" />
-              : <Trash2 className="h-4 w-4" />
-            }
-          </button>
+          <div className="flex items-center gap-1">
+            {onEdit && (
+              <button onClick={() => onEdit(item)} className="text-muted-foreground hover:text-primary transition-colors p-1">
+                <Pencil className="h-4 w-4" />
+              </button>
+            )}
+            <button
+              onClick={() => onDelete(item.id)}
+              disabled={deleting === item.id}
+              className="text-muted-foreground hover:text-destructive transition-colors p-1"
+            >
+              {deleting === item.id
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : <Trash2 className="h-4 w-4" />
+              }
+            </button>
+          </div>
           <button
             onClick={() => setBidOpen(v => !v)}
             className="text-[10px] text-muted-foreground border rounded px-1.5 py-0.5 hover:border-primary/50 transition-colors flex items-center gap-0.5"
@@ -415,6 +512,7 @@ function BundleGroup({
   openBundleMenuId,
   onOpenMenu,
   onCloseMenu,
+  onEdit,
 }: {
   bundle: Bundle;
   items: HistoryItem[];
@@ -436,6 +534,8 @@ function BundleGroup({
   openBundleMenuId: string | null;
   onOpenMenu: (id: string) => void;
   onCloseMenu: () => void;
+  onEdit?: (item: HistoryItem) => void;
+  onEdit?: (item: HistoryItem) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
   const [bid, setBid] = useState(bundle.bidHkd > 0 ? String(bundle.bidHkd) : "");
@@ -546,6 +646,7 @@ function BundleGroup({
                   menuOpen={openBundleMenuId === item.id}
                   onOpenMenu={onOpenMenu}
                   onCloseMenu={onCloseMenu}
+                  onEdit={onEdit}
                 />
                 <button
                   onClick={() => onRemoveFromBundle(bundle.id, item.id)}
@@ -579,6 +680,7 @@ function BundleGroup({
                     isDragging={draggingId === item.id}
                     inBundle
                     allocatedCost={allocatedCost}
+                    onEdit={onEdit}
                   />
                   <button
                     onClick={() => onRemoveFromBundle(bundle.id, item.id)}
@@ -662,6 +764,16 @@ export default function HistoryPage() {
   const [bundles, setBundles] = useState<Bundle[]>([]);
   const [isMobile, setIsMobile] = useState(false);
 
+  // Sneakdunk edit
+  const [editingItem, setEditingItem] = useState<HistoryItem | null>(null);
+
+  // Folders
+  const [folders, setFolders] = useState<CardFolder[]>([]);
+  const [folderItems, setFolderItems] = useState<Record<string, string[]>>({}); // folderId -> itemIds
+  const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [showNewFolder, setShowNewFolder] = useState(false);
+
   // Mobile bundle menu state
   const [openBundleMenuId, setOpenBundleMenuId] = useState<string | null>(null);
 
@@ -691,6 +803,14 @@ export default function HistoryPage() {
           setBundles(parsed.map(b => ({ ...b, itemIds: Array.isArray(b.itemIds) ? b.itemIds : [] })));
         }
       }
+    } catch {}
+    try {
+      const s = localStorage.getItem(FOLDERS_KEY);
+      if (s) setFolders(JSON.parse(s));
+    } catch {}
+    try {
+      const s = localStorage.getItem(FOLDER_ITEMS_KEY);
+      if (s) setFolderItems(JSON.parse(s));
     } catch {}
   }, []);
 
@@ -825,6 +945,47 @@ export default function HistoryPage() {
     saveBundles(bundles.filter(b => b.id !== bundleId));
   }
 
+  // ── Folder helpers ──
+
+  function saveFolders(next: CardFolder[], nextItems: Record<string, string[]>) {
+    setFolders(next);
+    setFolderItems(nextItems);
+    try { localStorage.setItem(FOLDERS_KEY, JSON.stringify(next)); } catch {}
+    try { localStorage.setItem(FOLDER_ITEMS_KEY, JSON.stringify(nextItems)); } catch {}
+  }
+
+  function createFolder() {
+    const name = newFolderName.trim();
+    if (!name) return;
+    const folder: CardFolder = { id: crypto.randomUUID(), name, createdAt: new Date().toISOString() };
+    saveFolders([...folders, folder], folderItems);
+    setNewFolderName("");
+    setShowNewFolder(false);
+    setActiveFolderId(folder.id);
+  }
+
+  function deleteFolder(folderId: string) {
+    if (!confirm("Delete this folder? Cards will stay in history.")) return;
+    const nextItems = { ...folderItems };
+    delete nextItems[folderId];
+    saveFolders(folders.filter(f => f.id !== folderId), nextItems);
+    if (activeFolderId === folderId) setActiveFolderId(null);
+  }
+
+  function toggleItemInFolder(folderId: string, itemId: string) {
+    const current = folderItems[folderId] ?? [];
+    const next = current.includes(itemId) ? current.filter(id => id !== itemId) : [...current, itemId];
+    const nextItems = { ...folderItems, [folderId]: next };
+    saveFolders(folders, nextItems);
+  }
+
+  function handleSneakdunkSaved(itemId: string, updated: Partial<HistoryItem>) {
+    setData(prev => {
+      if (!prev) return prev;
+      return { ...prev, items: prev.items.map(i => i.id === itemId ? { ...i, ...updated } : i) };
+    });
+  }
+
   async function fetchHistory() {
     setLoading(true);
     setError(null);
@@ -885,13 +1046,28 @@ export default function HistoryPage() {
   for (const bundle of bundles) {
     for (const id of bundle.itemIds) bundledItemIds.add(id);
   }
-  const ungroupedItems = allItems.filter(item => !bundledItemIds.has(item.id));
+
+  // Filter by active folder
+  const activeFolder = folders.find(f => f.id === activeFolderId) ?? null;
+  const activeFolderItemIds = activeFolderId ? new Set(folderItems[activeFolderId] ?? []) : null;
+  const displayItems = activeFolderItemIds
+    ? allItems.filter(i => activeFolderItemIds.has(i.id))
+    : allItems;
+  const ungroupedItems = displayItems.filter(item => !bundledItemIds.has(item.id));
 
   const pendingSource = pendingBundle ? itemById[pendingBundle.sourceId] : null;
   const pendingTarget = pendingBundle ? itemById[pendingBundle.targetId] : null;
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-12 space-y-6">
+    <div className="max-w-5xl mx-auto px-4 py-12 space-y-6">
+      {editingItem && (
+        <SneakdunkEditDialog
+          item={editingItem}
+          onClose={() => setEditingItem(null)}
+          onSaved={(updated) => { handleSneakdunkSaved(editingItem.id, updated); }}
+        />
+      )}
+
       <div className="space-y-1">
         <Link href="/">
           <Button variant="ghost" size="sm" className="gap-1.5">
@@ -914,11 +1090,6 @@ export default function HistoryPage() {
             Drag a card onto another to create a bundle, or onto an existing bundle to add it.
           </p>
         )}
-        {isMobile && allItems.length > 1 && (
-          <p className="text-xs text-muted-foreground">
-            Tap cards to select them, then bundle together.
-          </p>
-        )}
       </div>
 
       {allItems.length === 0 ? (
@@ -927,94 +1098,185 @@ export default function HistoryPage() {
           <Link href="/"><Button>Scan your first card</Button></Link>
         </div>
       ) : (
-        <div className="space-y-6">
-          {/* Desktop bundle creation prompt */}
-          {!isMobile && pendingBundle && pendingSource && pendingTarget && (
-            <BundlePrompt
-              sourceItem={pendingSource}
-              targetItem={pendingTarget}
-              onConfirm={confirmBundle}
-              onCancel={() => setPendingBundle(null)}
-            />
-          )}
+        <div className="flex gap-4">
+          {/* Folder sidebar */}
+          <div className="shrink-0 w-36 space-y-1">
+            <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold px-1 pb-1">Folders</p>
+            <button
+              onClick={() => setActiveFolderId(null)}
+              className={`w-full text-left text-xs px-2 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${!activeFolderId ? "bg-primary text-primary-foreground" : "hover:bg-muted text-muted-foreground"}`}
+            >
+              <Folder className="h-3 w-3 shrink-0" />
+              All cards
+              <span className="ml-auto text-[10px] opacity-60">{allItems.length}</span>
+            </button>
+            {folders.map(f => (
+              <div key={f.id} className="group relative">
+                <button
+                  onClick={() => setActiveFolderId(f.id)}
+                  className={`w-full text-left text-xs px-2 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${activeFolderId === f.id ? "bg-primary text-primary-foreground" : "hover:bg-muted text-muted-foreground"}`}
+                >
+                  <Folder className="h-3 w-3 shrink-0" />
+                  <span className="truncate flex-1">{f.name}</span>
+                  <span className="ml-auto text-[10px] opacity-60">{(folderItems[f.id] ?? []).length}</span>
+                </button>
+                <button
+                  onClick={() => deleteFolder(f.id)}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover:flex text-muted-foreground hover:text-destructive p-0.5"
+                >
+                  <X className="h-2.5 w-2.5" />
+                </button>
+              </div>
+            ))}
+            {showNewFolder ? (
+              <div className="space-y-1 pt-1">
+                <Input
+                  autoFocus
+                  placeholder="Folder name"
+                  value={newFolderName}
+                  onChange={e => setNewFolderName(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") createFolder(); if (e.key === "Escape") setShowNewFolder(false); }}
+                  className="h-7 text-xs px-2"
+                />
+                <div className="flex gap-1">
+                  <Button size="sm" onClick={createFolder} className="flex-1 h-6 text-[10px]">Add</Button>
+                  <Button size="sm" variant="outline" onClick={() => setShowNewFolder(false)} className="flex-1 h-6 text-[10px]">Cancel</Button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowNewFolder(true)}
+                className="w-full text-left text-xs px-2 py-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors flex items-center gap-1.5"
+              >
+                <FolderPlus className="h-3 w-3 shrink-0" />
+                New folder
+              </button>
+            )}
+            {/* Folder assignment when a folder is active */}
+            {activeFolderId && (
+              <div className="pt-3 border-t space-y-1">
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold px-1">Add to folder</p>
+                {allItems.map(item => {
+                  const inFolder = (folderItems[activeFolderId] ?? []).includes(item.id);
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => toggleItemInFolder(activeFolderId, item.id)}
+                      className={`w-full text-left text-[10px] px-2 py-1 rounded transition-colors truncate flex items-center gap-1 ${inFolder ? "text-primary bg-primary/10" : "text-muted-foreground hover:bg-muted"}`}
+                    >
+                      <span className="shrink-0">{inFolder ? "✓" : "+"}</span>
+                      <span className="truncate">{item.name_en}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
 
-          {/* Bundles */}
-          {bundles.map((bundle) => {
-            const bundleItems = bundle.itemIds.map(id => itemById[id]).filter(Boolean) as HistoryItem[];
-            if (bundleItems.length === 0) return null;
-            return (
-              <BundleGroup
-                key={bundle.id}
-                bundle={bundle}
-                items={bundleItems}
-                onDelete={handleDelete}
-                deleting={deleting}
-                onDeleteBundle={deleteBundle}
-                onRemoveFromBundle={removeFromBundle}
-                onDragStart={handleDragStart}
-                onDragOverBundle={handleDragOverBundle}
-                onDropOnBundle={handleDropOnBundle}
-                onDragEnd={handleDragEnd}
-                isDragOver={dragOverBundleId === bundle.id}
-                draggingId={draggingId}
-                onBidChange={setBid}
-                biddingPrices={biddingPrices}
-                isMobile={isMobile}
-                allBundles={bundles}
-                onQuickBundle={handleQuickBundle}
-                openBundleMenuId={openBundleMenuId}
-                onOpenMenu={setOpenBundleMenuId}
-                onCloseMenu={() => setOpenBundleMenuId(null)}
+          {/* Main content */}
+          <div className="flex-1 min-w-0 space-y-6">
+            {activeFolder && (
+              <p className="text-sm font-semibold flex items-center gap-1.5">
+                <Folder className="h-4 w-4 text-primary" />
+                {activeFolder.name}
+                <span className="text-muted-foreground font-normal text-xs">({displayItems.length} cards)</span>
+              </p>
+            )}
+
+            {/* Desktop bundle creation prompt */}
+            {!isMobile && pendingBundle && pendingSource && pendingTarget && (
+              <BundlePrompt
+                sourceItem={pendingSource}
+                targetItem={pendingTarget}
+                onConfirm={confirmBundle}
+                onCancel={() => setPendingBundle(null)}
               />
-            );
-          })}
+            )}
 
-          {/* Ungrouped cards */}
-          {ungroupedItems.length > 0 && (
-            <div className="space-y-3">
-              {bundles.length > 0 && (
-                <p className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Individual cards</p>
-              )}
-              {isMobile ? (
-                <div className="flex flex-col gap-2">
-                  {ungroupedItems.map((item) => (
-                    <MobileCardRowWithBid
-                      key={item.id}
-                      item={item}
-                      onDelete={handleDelete}
-                      deleting={deleting}
-                      bidPrice={biddingPrices[item.id] ?? ""}
-                      onBidChange={setBid}
-                      bundles={bundles}
-                      onQuickBundle={handleQuickBundle}
-                      menuOpen={openBundleMenuId === item.id}
-                      onOpenMenu={setOpenBundleMenuId}
-                      onCloseMenu={() => setOpenBundleMenuId(null)}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                  {ungroupedItems.map((item) => (
-                    <CardTile
-                      key={item.id}
-                      item={item}
-                      onDelete={handleDelete}
-                      deleting={deleting}
-                      bidPrice={biddingPrices[item.id] ?? ""}
-                      onBidChange={setBid}
-                      onDragStart={handleDragStart}
-                      onDragOver={handleDragOverCard}
-                      onDrop={handleDropOnCard}
-                      onDragEnd={handleDragEnd}
-                      isDragOver={dragOverId === item.id}
-                      isDragging={draggingId === item.id}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+            {/* Bundles */}
+            {bundles.map((bundle) => {
+              const bundleItems = bundle.itemIds
+                .map(id => itemById[id])
+                .filter(Boolean)
+                .filter(item => !activeFolderItemIds || activeFolderItemIds.has(item.id)) as HistoryItem[];
+              if (bundleItems.length === 0) return null;
+              return (
+                <BundleGroup
+                  key={bundle.id}
+                  bundle={bundle}
+                  items={bundleItems}
+                  onDelete={handleDelete}
+                  deleting={deleting}
+                  onDeleteBundle={deleteBundle}
+                  onRemoveFromBundle={removeFromBundle}
+                  onDragStart={handleDragStart}
+                  onDragOverBundle={handleDragOverBundle}
+                  onDropOnBundle={handleDropOnBundle}
+                  onDragEnd={handleDragEnd}
+                  isDragOver={dragOverBundleId === bundle.id}
+                  draggingId={draggingId}
+                  onBidChange={setBid}
+                  biddingPrices={biddingPrices}
+                  isMobile={isMobile}
+                  allBundles={bundles}
+                  onQuickBundle={handleQuickBundle}
+                  openBundleMenuId={openBundleMenuId}
+                  onOpenMenu={setOpenBundleMenuId}
+                  onCloseMenu={() => setOpenBundleMenuId(null)}
+                  onEdit={setEditingItem}
+                />
+              );
+            })}
+
+            {/* Ungrouped cards */}
+            {ungroupedItems.length > 0 && (
+              <div className="space-y-3">
+                {bundles.length > 0 && (
+                  <p className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Individual cards</p>
+                )}
+                {isMobile ? (
+                  <div className="flex flex-col gap-2">
+                    {ungroupedItems.map((item) => (
+                      <MobileCardRowWithBid
+                        key={item.id}
+                        item={item}
+                        onDelete={handleDelete}
+                        deleting={deleting}
+                        bidPrice={biddingPrices[item.id] ?? ""}
+                        onBidChange={setBid}
+                        bundles={bundles}
+                        onQuickBundle={handleQuickBundle}
+                        menuOpen={openBundleMenuId === item.id}
+                        onOpenMenu={setOpenBundleMenuId}
+                        onCloseMenu={() => setOpenBundleMenuId(null)}
+                        onEdit={setEditingItem}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                    {ungroupedItems.map((item) => (
+                      <CardTile
+                        key={item.id}
+                        item={item}
+                        onDelete={handleDelete}
+                        deleting={deleting}
+                        bidPrice={biddingPrices[item.id] ?? ""}
+                        onBidChange={setBid}
+                        onDragStart={handleDragStart}
+                        onDragOver={handleDragOverCard}
+                        onDrop={handleDropOnCard}
+                        onDragEnd={handleDragEnd}
+                        isDragOver={dragOverId === item.id}
+                        isDragging={draggingId === item.id}
+                        onEdit={setEditingItem}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
