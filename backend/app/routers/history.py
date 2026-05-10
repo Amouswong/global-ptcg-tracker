@@ -219,6 +219,40 @@ async def get_scan_history(
     }
 
 
+@router.post("/backfill-sneakdunk")
+async def backfill_sneakdunk(db: AsyncSession = Depends(get_db)):
+    """Re-fetch Sneakdunk prices for all records missing them."""
+    from sqlalchemy import or_
+    result = await db.execute(
+        select(ScanHistory).where(
+            or_(ScanHistory.sneakdunk_url.is_(None), ScanHistory.sneakdunk_lowest_ask_hkd.is_(None))
+        )
+    )
+    rows = result.scalars().all()
+    updated = 0
+    for row in rows:
+        try:
+            name_ja = row.name if row.language == "ja" else None
+            sd = await sneakdunk.search_card_price(
+                name_en=row.name_en,
+                name_ja=name_ja,
+                number=row.number,
+                set_code=row.set_name,
+            )
+            if sd:
+                row.sneakdunk_url = sd.get("url")
+                row.sneakdunk_lowest_ask_jpy = sd.get("lowest_ask_jpy")
+                row.sneakdunk_lowest_ask_hkd = sd.get("lowest_ask_hkd")
+                row.sneakdunk_market_price_jpy = sd.get("market_price_jpy")
+                row.sneakdunk_market_price_hkd = sd.get("market_price_hkd")
+                updated += 1
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("Backfill failed for %s: %s", row.name_en, e)
+    await db.commit()
+    return {"updated": updated, "total": len(rows)}
+
+
 @router.delete("/{record_id}")
 async def delete_history_record(
     record_id: str,
