@@ -1,13 +1,17 @@
 import asyncio
+import logging
 import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.integrations import gemini_vision, tcgdex
+from app.integrations import gemini_vision, sneakdunk, tcgdex
 from app.models.db.recognition_log import RecognitionLog
+from app.models.db.scan_history import ScanHistory
 from app.models.schemas.card import CardSummarySchema
 from app.models.schemas.recognition import RecognitionCandidateSchema, RecognitionResponseSchema
 from app.services import card_service
+
+logger = logging.getLogger(__name__)
 
 
 async def identify_card(image_bytes: bytes, content_type: str, db: AsyncSession) -> RecognitionResponseSchema:
@@ -71,6 +75,44 @@ async def identify_card(image_bytes: bytes, content_type: str, db: AsyncSession)
             image_hash=None,
         )
     )
+
+    # Save top card to scan history
+    if top_card and vision_result:
+        try:
+            language = vision_result.get("language", "en")
+            name_ja = vision_result.get("name") if language == "ja" else None
+            sd = None
+            try:
+                sd = await sneakdunk.search_card_price(
+                    name_en=top_card.name,
+                    name_ja=name_ja,
+                    number=top_card.number,
+                    set_code=None,
+                )
+            except Exception as e:
+                logger.warning("Sneakdunk fetch failed for %s: %s", top_card.name, e)
+
+            db.add(ScanHistory(
+                id=str(uuid.uuid4()),
+                scan_id=recognition_id,
+                name_en=top_card.name,
+                name=vision_result.get("name") or top_card.name,
+                set_name=top_card.set_name,
+                number=top_card.number,
+                language=language,
+                rarity=top_card.rarity,
+                graded=False,
+                confidence=top_confidence,
+                card_image_url=top_card.image_url_small,
+                sneakdunk_url=sd.get("url") if sd else None,
+                sneakdunk_lowest_ask_jpy=sd.get("lowest_ask_jpy") if sd else None,
+                sneakdunk_lowest_ask_hkd=sd.get("lowest_ask_hkd") if sd else None,
+                sneakdunk_market_price_jpy=sd.get("market_price_jpy") if sd else None,
+                sneakdunk_market_price_hkd=sd.get("market_price_hkd") if sd else None,
+            ))
+        except Exception:
+            logger.exception("Failed to save recognition result to scan history")
+
     await db.commit()
 
     return RecognitionResponseSchema(
