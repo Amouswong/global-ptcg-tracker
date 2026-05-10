@@ -45,7 +45,8 @@ async def identify_card(image_bytes: bytes, content_type: str, db: AsyncSession)
         for result in results:
             if isinstance(result, Exception):
                 continue
-            for card in result:
+            cards = result.results if hasattr(result, "results") else result
+            for card in cards:
                 if card.id not in seen:
                     seen.add(card.id)
                     candidates.append(
