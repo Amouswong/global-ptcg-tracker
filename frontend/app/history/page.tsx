@@ -39,6 +39,11 @@ interface HistoryItem {
   psa_10_hkd: number | null;
   bgs_10_hkd: number | null;
   source_url: string | null;
+  sneakdunk_url: string | null;
+  sneakdunk_lowest_ask_jpy: number | null;
+  sneakdunk_lowest_ask_hkd: number | null;
+  sneakdunk_market_price_jpy: number | null;
+  sneakdunk_market_price_hkd: number | null;
   card_image_url: string | null;
   scanned_at: string | null;
 }
@@ -54,11 +59,10 @@ interface Bundle {
   id: string;
   name: string;
   bidHkd: number;
-  itemIds: string[]; // HistoryItem.id values
+  itemIds: string[];
   createdAt: string;
 }
 
-// Pending bundle prompt state — shown when card is dropped onto another card
 interface PendingBundle {
   sourceId: string;
   targetId: string;
@@ -81,7 +85,7 @@ function priceLabel(item: HistoryItem): string | null {
   return m != null ? `HK$${m.toLocaleString()}` : null;
 }
 
-// ── Draggable card tile ──────────────────────────────────────────────────────
+// ── Draggable card tile (desktop) ────────────────────────────────────────────
 
 function CardTile({
   item,
@@ -131,7 +135,6 @@ function CardTile({
         ${isDragOver ? "border-blue-500 ring-2 ring-blue-500/40 scale-[1.02]" : "hover:border-primary/50"}
       `}
     >
-      {/* Drag handle hint */}
       <div className="flex items-center justify-between px-2 pt-1.5 pb-0">
         <GripVertical className="h-3.5 w-3.5 text-muted-foreground/40" />
         {isDragOver && (
@@ -170,6 +173,20 @@ function CardTile({
           <p className="text-xs text-muted-foreground mt-0.5 truncate">
             {item.set_name || "Unknown Set"}{item.number ? ` · #${item.number}` : ""}
           </p>
+          {(item.sneakdunk_url || item.sneakdunk_lowest_ask_hkd) && (
+            <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+              <span className="text-[9px] uppercase tracking-widest text-orange-500/70 font-semibold">Snkrdunk</span>
+              {item.sneakdunk_lowest_ask_hkd && (
+                <span className="text-xs font-bold text-orange-400">
+                  HK${item.sneakdunk_lowest_ask_hkd.toLocaleString()}
+                </span>
+              )}
+              {item.sneakdunk_url && (
+                <a href={item.sneakdunk_url} target="_blank" rel="noopener noreferrer"
+                  className="text-[10px] text-muted-foreground hover:text-foreground transition-colors">↗</a>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="flex gap-2 mt-auto">
@@ -218,6 +235,163 @@ function CardTile({
   );
 }
 
+// ── Mobile card row ──────────────────────────────────────────────────────────
+
+function MobileCardRowWithBid({
+  item,
+  onDelete,
+  deleting,
+  bidPrice,
+  onBidChange,
+  bundles,
+  onQuickBundle,
+  menuOpen,
+  onOpenMenu,
+  onCloseMenu,
+}: {
+  item: HistoryItem;
+  onDelete: (id: string) => void;
+  deleting: string | null;
+  bidPrice: string;
+  onBidChange: (id: string, v: string) => void;
+  bundles: Bundle[];
+  onQuickBundle: (itemId: string, target: "new" | string) => void;
+  menuOpen: boolean;
+  onOpenMenu: (id: string) => void;
+  onCloseMenu: () => void;
+}) {
+  const [bidOpen, setBidOpen] = useState(false);
+  const gradedLabel = item.grade_company && item.grade_value
+    ? `${item.grade_company} ${item.grade_value}` : null;
+  const pd = priceLabel(item);
+  const bid = parseFloat(bidPrice);
+  const mkt = marketPriceHkd(item);
+  const profit = !isNaN(bid) && bid > 0 && mkt != null ? mkt - bid : null;
+
+  return (
+    <div className="flex flex-col">
+      <div className={`flex items-center gap-3 border rounded-xl p-2 transition-all bg-card hover:border-primary/40 ${bidOpen ? "rounded-b-none border-b-0" : ""}`}>
+        {/* Thumbnail */}
+        <div className="relative shrink-0 w-14 h-20 rounded-lg overflow-hidden bg-muted">
+          {item.card_image_url ? (
+            <img src={item.card_image_url} alt={item.name_en} className="w-full h-full object-cover" />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-[9px] text-muted-foreground text-center px-1 leading-tight">
+              No image
+            </div>
+          )}
+          <span className="absolute bottom-1 left-1 bg-black/60 text-white text-[8px] font-bold px-1 rounded">
+            {item.language.toUpperCase()}
+          </span>
+        </div>
+
+        {/* Info */}
+        <div className="flex-1 min-w-0 space-y-0.5">
+          <p className="text-sm font-semibold leading-tight line-clamp-1">{item.name_en}</p>
+          <p className="text-xs text-muted-foreground truncate">
+            {item.set_name || "Unknown Set"}{item.number ? ` · #${item.number}` : ""}
+          </p>
+          <div className="flex items-center gap-2 pt-0.5 flex-wrap">
+            <span className="text-xs font-semibold text-yellow-500">{gradedLabel ?? "Raw"}</span>
+            {pd && <span className="text-xs font-bold text-emerald-500">{pd}</span>}
+            {item.sneakdunk_lowest_ask_hkd && (
+              <span className="text-xs font-bold text-orange-400">
+                SD HK${item.sneakdunk_lowest_ask_hkd.toLocaleString()}
+              </span>
+            )}
+            {item.sneakdunk_url && (
+              <a href={item.sneakdunk_url} target="_blank" rel="noopener noreferrer"
+                className="text-[10px] text-muted-foreground hover:text-foreground transition-colors">
+                Snkrdunk ↗
+              </a>
+            )}
+          </div>
+          {profit !== null && (
+            <div className={`inline-flex text-[10px] font-semibold rounded px-1.5 py-0.5 ${
+              profit >= 0 ? "bg-green-500/10 text-green-700" : "bg-red-500/10 text-red-700"
+            }`}>
+              {profit >= 0 ? "+" : ""}HK${profit.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+            </div>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="flex flex-col items-end gap-2 shrink-0">
+          <button
+            onClick={() => onDelete(item.id)}
+            disabled={deleting === item.id}
+            className="text-muted-foreground hover:text-destructive transition-colors p-1"
+          >
+            {deleting === item.id
+              ? <Loader2 className="h-4 w-4 animate-spin" />
+              : <Trash2 className="h-4 w-4" />
+            }
+          </button>
+          <button
+            onClick={() => setBidOpen(v => !v)}
+            className="text-[10px] text-muted-foreground border rounded px-1.5 py-0.5 hover:border-primary/50 transition-colors flex items-center gap-0.5"
+          >
+            Bid
+            {bidOpen ? <ChevronUp className="h-2.5 w-2.5" /> : <ChevronDown className="h-2.5 w-2.5" />}
+          </button>
+          {/* Bundle quick-add */}
+          <div className="relative">
+            <button
+              onClick={() => menuOpen ? onCloseMenu() : onOpenMenu(item.id)}
+              className="text-muted-foreground hover:text-blue-500 transition-colors p-1"
+              title="Add to bundle"
+            >
+              <Package className="h-4 w-4" />
+            </button>
+            {menuOpen && (
+              <div className="absolute right-0 top-7 z-30 bg-popover border rounded-lg shadow-lg min-w-[150px] py-1 text-sm">
+                <button
+                  onClick={() => { onQuickBundle(item.id, "new"); onCloseMenu(); }}
+                  className="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors text-blue-500 font-medium"
+                >
+                  + New bundle
+                </button>
+                {bundles.map(b => (
+                  <button
+                    key={b.id}
+                    onClick={() => { onQuickBundle(item.id, b.id); onCloseMenu(); }}
+                    className="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors truncate"
+                  >
+                    {b.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Expandable bid section */}
+      {bidOpen && (
+        <div className="border border-t-0 rounded-b-xl px-3 pb-3 pt-2 bg-card space-y-1.5">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground whitespace-nowrap">Bid HK$</span>
+            <Input
+              type="number" min="0" step="1" placeholder="0"
+              value={bidPrice}
+              onChange={(e) => onBidChange(item.id, e.target.value)}
+              className="h-7 text-sm flex-1"
+            />
+          </div>
+          {profit !== null && (
+            <div className={`flex justify-between text-xs font-semibold rounded px-2 py-1 ${
+              profit >= 0 ? "bg-green-500/10 text-green-700" : "bg-red-500/10 text-red-700"
+            }`}>
+              <span>Profit</span>
+              <span>{profit >= 0 ? "+" : ""}HK${profit.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Bundle group ─────────────────────────────────────────────────────────────
 
 function BundleGroup({
@@ -235,6 +409,12 @@ function BundleGroup({
   draggingId,
   onBidChange,
   biddingPrices,
+  isMobile,
+  allBundles,
+  onQuickBundle,
+  openBundleMenuId,
+  onOpenMenu,
+  onCloseMenu,
 }: {
   bundle: Bundle;
   items: HistoryItem[];
@@ -250,6 +430,12 @@ function BundleGroup({
   draggingId: string | null;
   onBidChange: (id: string, v: string) => void;
   biddingPrices: Record<string, string>;
+  isMobile: boolean;
+  allBundles: Bundle[];
+  onQuickBundle: (itemId: string, target: "new" | string) => void;
+  openBundleMenuId: string | null;
+  onOpenMenu: (id: string) => void;
+  onCloseMenu: () => void;
 }) {
   const [expanded, setExpanded] = useState(true);
   const [bid, setBid] = useState(bundle.bidHkd > 0 ? String(bundle.bidHkd) : "");
@@ -345,46 +531,73 @@ function BundleGroup({
 
       {/* Cards */}
       {expanded && (
-        <div className="px-4 pb-4 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 border-t pt-3">
-          {items.map((item) => {
-            const m = marketPriceHkd(item);
-            const allocatedCost = !isNaN(bidNum) && bidNum > 0 && totalMarket > 0 && m != null
-              ? (m / totalMarket) * bidNum : null;
-            return (
+        isMobile ? (
+          <div className="px-4 pb-4 flex flex-col gap-2 border-t pt-3">
+            {items.map((item) => (
               <div key={item.id} className="relative">
-                <CardTile
+                <MobileCardRowWithBid
                   item={item}
                   onDelete={onDelete}
                   deleting={deleting}
                   bidPrice={biddingPrices[item.id] ?? ""}
                   onBidChange={onBidChange}
-                  onDragStart={onDragStart}
-                  onDragOver={() => {}}
-                  onDrop={() => {}}
-                  onDragEnd={onDragEnd}
-                  isDragOver={false}
-                  isDragging={draggingId === item.id}
-                  inBundle
-                  allocatedCost={allocatedCost}
+                  bundles={allBundles.filter(b => b.id !== bundle.id)}
+                  onQuickBundle={onQuickBundle}
+                  menuOpen={openBundleMenuId === item.id}
+                  onOpenMenu={onOpenMenu}
+                  onCloseMenu={onCloseMenu}
                 />
-                {/* Remove from bundle button */}
                 <button
                   onClick={() => onRemoveFromBundle(bundle.id, item.id)}
                   title="Remove from bundle"
-                  className="absolute top-6 right-1 z-10 bg-background border rounded-full p-0.5 text-muted-foreground hover:text-destructive transition-colors shadow-sm"
+                  className="absolute top-2 right-2 z-10 bg-background border rounded-full p-0.5 text-muted-foreground hover:text-destructive transition-colors shadow-sm"
                 >
                   <X className="h-3 w-3" />
                 </button>
               </div>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <div className="px-4 pb-4 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 border-t pt-3">
+            {items.map((item) => {
+              const m = marketPriceHkd(item);
+              const allocatedCost = !isNaN(bidNum) && bidNum > 0 && totalMarket > 0 && m != null
+                ? (m / totalMarket) * bidNum : null;
+              return (
+                <div key={item.id} className="relative">
+                  <CardTile
+                    item={item}
+                    onDelete={onDelete}
+                    deleting={deleting}
+                    bidPrice={biddingPrices[item.id] ?? ""}
+                    onBidChange={onBidChange}
+                    onDragStart={onDragStart}
+                    onDragOver={() => {}}
+                    onDrop={() => {}}
+                    onDragEnd={onDragEnd}
+                    isDragOver={false}
+                    isDragging={draggingId === item.id}
+                    inBundle
+                    allocatedCost={allocatedCost}
+                  />
+                  <button
+                    onClick={() => onRemoveFromBundle(bundle.id, item.id)}
+                    title="Remove from bundle"
+                    className="absolute top-6 right-1 z-10 bg-background border rounded-full p-0.5 text-muted-foreground hover:text-destructive transition-colors shadow-sm"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )
       )}
     </div>
   );
 }
 
-// ── Bundle creation dialog (inline) ─────────────────────────────────────────
+// ── Bundle creation dialog (desktop inline) ──────────────────────────────────
 
 function BundlePrompt({
   sourceItem,
@@ -447,14 +660,23 @@ export default function HistoryPage() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [biddingPrices, setBiddingPrices] = useState<Record<string, string>>({});
   const [bundles, setBundles] = useState<Bundle[]>([]);
+  const [isMobile, setIsMobile] = useState(false);
 
-  // Drag state
+  // Mobile bundle menu state
+  const [openBundleMenuId, setOpenBundleMenuId] = useState<string | null>(null);
+
+  // Desktop drag state
   const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [dragOverId, setDragOverId] = useState<string | null>(null);       // card id
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [dragOverBundleId, setDragOverBundleId] = useState<string | null>(null);
-
-  // Pending bundle creation
   const [pendingBundle, setPendingBundle] = useState<PendingBundle | null>(null);
+
+  useEffect(() => {
+    setIsMobile(
+      window.matchMedia("(pointer: coarse)").matches ||
+      ("ontouchstart" in window && window.innerWidth < 768)
+    );
+  }, []);
 
   useEffect(() => {
     try {
@@ -463,7 +685,12 @@ export default function HistoryPage() {
     } catch {}
     try {
       const s = localStorage.getItem(BUNDLES_KEY);
-      if (s) setBundles(JSON.parse(s));
+      if (s) {
+        const parsed = JSON.parse(s);
+        if (Array.isArray(parsed)) {
+          setBundles(parsed.map(b => ({ ...b, itemIds: Array.isArray(b.itemIds) ? b.itemIds : [] })));
+        }
+      }
     } catch {}
   }, []);
 
@@ -481,7 +708,32 @@ export default function HistoryPage() {
     });
   }
 
-  // ── Drag handlers ──
+  // ── Mobile bundle quick-add ──
+
+  function handleQuickBundle(itemId: string, target: "new" | string) {
+    if (target === "new") {
+      const bundle: Bundle = {
+        id: crypto.randomUUID(),
+        name: `Bundle ${new Date().toLocaleDateString()}`,
+        bidHkd: 0,
+        itemIds: [itemId],
+        createdAt: new Date().toISOString(),
+      };
+      const cleaned = bundles.map(b => ({
+        ...b,
+        itemIds: b.itemIds.filter(id => id !== itemId),
+      })).filter(b => b.itemIds.length > 0);
+      saveBundles([bundle, ...cleaned]);
+    } else {
+      const updated = bundles.map(b => {
+        if (b.id === target) return { ...b, itemIds: b.itemIds.includes(itemId) ? b.itemIds : [...b.itemIds, itemId] };
+        return { ...b, itemIds: b.itemIds.filter(id => id !== itemId) };
+      }).filter(b => b.itemIds.length > 0);
+      saveBundles(updated);
+    }
+  }
+
+  // ── Desktop drag handlers ──
 
   function handleDragStart(id: string) {
     setDraggingId(id);
@@ -510,12 +762,10 @@ export default function HistoryPage() {
   function handleDropOnCard(targetId: string) {
     if (!draggingId || draggingId === targetId) { handleDragEnd(); return; }
 
-    // Check if dragging card is already in a bundle — remove it first
     const sourceInBundle = bundles.find(b => b.itemIds.includes(draggingId));
     const targetInBundle = bundles.find(b => b.itemIds.includes(targetId));
 
     if (targetInBundle) {
-      // Drop onto a card that's inside a bundle → add source to that bundle
       if (!targetInBundle.itemIds.includes(draggingId)) {
         const updated = bundles.map(b => {
           if (b.id === targetInBundle.id) return { ...b, itemIds: [...b.itemIds, draggingId] };
@@ -528,7 +778,6 @@ export default function HistoryPage() {
       return;
     }
 
-    // Both ungrouped → ask to create bundle
     setPendingBundle({ sourceId: draggingId, targetId });
     handleDragEnd();
   }
@@ -539,7 +788,6 @@ export default function HistoryPage() {
     const bundle = bundles.find(b => b.id === bundleId);
     if (!bundle || bundle.itemIds.includes(draggingId)) { handleDragEnd(); return; }
 
-    // Remove from any existing bundle first
     const updated = bundles.map(b => {
       if (b.id === bundleId) return { ...b, itemIds: [...b.itemIds, draggingId] };
       return { ...b, itemIds: b.itemIds.filter(id => id !== draggingId) };
@@ -557,7 +805,6 @@ export default function HistoryPage() {
       itemIds: [pendingBundle.sourceId, pendingBundle.targetId],
       createdAt: new Date().toISOString(),
     };
-    // Remove source from any existing bundle
     const cleaned = bundles.map(b => ({
       ...b,
       itemIds: b.itemIds.filter(id => id !== pendingBundle.sourceId && id !== pendingBundle.targetId),
@@ -640,7 +887,6 @@ export default function HistoryPage() {
   }
   const ungroupedItems = allItems.filter(item => !bundledItemIds.has(item.id));
 
-  // Find items involved in pending bundle prompt
   const pendingSource = pendingBundle ? itemById[pendingBundle.sourceId] : null;
   const pendingTarget = pendingBundle ? itemById[pendingBundle.targetId] : null;
 
@@ -663,9 +909,14 @@ export default function HistoryPage() {
             </span>
           )}
         </p>
-        {allItems.length > 1 && (
+        {!isMobile && allItems.length > 1 && (
           <p className="text-xs text-muted-foreground">
             Drag a card onto another to create a bundle, or onto an existing bundle to add it.
+          </p>
+        )}
+        {isMobile && allItems.length > 1 && (
+          <p className="text-xs text-muted-foreground">
+            Tap cards to select them, then bundle together.
           </p>
         )}
       </div>
@@ -677,8 +928,8 @@ export default function HistoryPage() {
         </div>
       ) : (
         <div className="space-y-6">
-          {/* Bundle creation prompt */}
-          {pendingBundle && pendingSource && pendingTarget && (
+          {/* Desktop bundle creation prompt */}
+          {!isMobile && pendingBundle && pendingSource && pendingTarget && (
             <BundlePrompt
               sourceItem={pendingSource}
               targetItem={pendingTarget}
@@ -687,7 +938,7 @@ export default function HistoryPage() {
             />
           )}
 
-          {/* Existing bundles */}
+          {/* Bundles */}
           {bundles.map((bundle) => {
             const bundleItems = bundle.itemIds.map(id => itemById[id]).filter(Boolean) as HistoryItem[];
             if (bundleItems.length === 0) return null;
@@ -708,6 +959,12 @@ export default function HistoryPage() {
                 draggingId={draggingId}
                 onBidChange={setBid}
                 biddingPrices={biddingPrices}
+                isMobile={isMobile}
+                allBundles={bundles}
+                onQuickBundle={handleQuickBundle}
+                openBundleMenuId={openBundleMenuId}
+                onOpenMenu={setOpenBundleMenuId}
+                onCloseMenu={() => setOpenBundleMenuId(null)}
               />
             );
           })}
@@ -718,24 +975,44 @@ export default function HistoryPage() {
               {bundles.length > 0 && (
                 <p className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Individual cards</p>
               )}
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                {ungroupedItems.map((item) => (
-                  <CardTile
-                    key={item.id}
-                    item={item}
-                    onDelete={handleDelete}
-                    deleting={deleting}
-                    bidPrice={biddingPrices[item.id] ?? ""}
-                    onBidChange={setBid}
-                    onDragStart={handleDragStart}
-                    onDragOver={handleDragOverCard}
-                    onDrop={handleDropOnCard}
-                    onDragEnd={handleDragEnd}
-                    isDragOver={dragOverId === item.id}
-                    isDragging={draggingId === item.id}
-                  />
-                ))}
-              </div>
+              {isMobile ? (
+                <div className="flex flex-col gap-2">
+                  {ungroupedItems.map((item) => (
+                    <MobileCardRowWithBid
+                      key={item.id}
+                      item={item}
+                      onDelete={handleDelete}
+                      deleting={deleting}
+                      bidPrice={biddingPrices[item.id] ?? ""}
+                      onBidChange={setBid}
+                      bundles={bundles}
+                      onQuickBundle={handleQuickBundle}
+                      menuOpen={openBundleMenuId === item.id}
+                      onOpenMenu={setOpenBundleMenuId}
+                      onCloseMenu={() => setOpenBundleMenuId(null)}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                  {ungroupedItems.map((item) => (
+                    <CardTile
+                      key={item.id}
+                      item={item}
+                      onDelete={handleDelete}
+                      deleting={deleting}
+                      bidPrice={biddingPrices[item.id] ?? ""}
+                      onBidChange={setBid}
+                      onDragStart={handleDragStart}
+                      onDragOver={handleDragOverCard}
+                      onDrop={handleDropOnCard}
+                      onDragEnd={handleDragEnd}
+                      isDragOver={dragOverId === item.id}
+                      isDragging={draggingId === item.id}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -743,4 +1020,3 @@ export default function HistoryPage() {
     </div>
   );
 }
-

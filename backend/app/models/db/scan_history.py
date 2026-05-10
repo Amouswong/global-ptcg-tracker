@@ -42,6 +42,12 @@ class ScanHistory(Base):
     bgs_10_hkd: Mapped[Optional[float]] = mapped_column(Float)
     # PriceCharting source URL
     source_url: Mapped[Optional[str]] = mapped_column(String(512))
+    # Sneakdunk prices (JPY and HKD)
+    sneakdunk_url: Mapped[Optional[str]] = mapped_column(String(512))
+    sneakdunk_lowest_ask_jpy: Mapped[Optional[float]] = mapped_column(Float)
+    sneakdunk_lowest_ask_hkd: Mapped[Optional[float]] = mapped_column(Float)
+    sneakdunk_market_price_jpy: Mapped[Optional[float]] = mapped_column(Float)
+    sneakdunk_market_price_hkd: Mapped[Optional[float]] = mapped_column(Float)
     # Card image (PriceCharting URL)
     card_image_url: Mapped[Optional[str]] = mapped_column(String(512))
     scanned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)

@@ -3,7 +3,7 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.integrations import claude_vision, tcgdex
+from app.integrations import gemini_vision, tcgdex
 from app.models.db.recognition_log import RecognitionLog
 from app.models.schemas.card import CardSummarySchema
 from app.models.schemas.recognition import RecognitionCandidateSchema, RecognitionResponseSchema
@@ -13,7 +13,7 @@ from app.services import card_service
 async def identify_card(image_bytes: bytes, content_type: str, db: AsyncSession) -> RecognitionResponseSchema:
     recognition_id = str(uuid.uuid4())
 
-    vision_result = await claude_vision.identify_card_from_image(image_bytes, content_type)
+    vision_result = await gemini_vision.identify_single_card(image_bytes, content_type)
 
     candidates: list[RecognitionCandidateSchema] = []
 
@@ -33,9 +33,7 @@ async def identify_card(image_bytes: bytes, content_type: str, db: AsyncSession)
 
         # For Japanese cards also search TCGdex with original name
         if language == "ja" and name_orig:
-            search_tasks.append(
-                _tcgdex_search(name_orig, db)
-            )
+            search_tasks.append(_tcgdex_search(name_orig, db))
 
         # If we have a card number, search by number too
         if number and tcgdex.looks_like_number(number):
@@ -53,8 +51,8 @@ async def identify_card(image_bytes: bytes, content_type: str, db: AsyncSession)
                     candidates.append(
                         RecognitionCandidateSchema(
                             card=card,
-                            confidence=0.95,
-                            match_method="claude_vision",
+                            confidence=vision_result.get("confidence", 0.95),
+                            match_method="gemini_vision",
                         )
                     )
 
@@ -68,7 +66,7 @@ async def identify_card(image_bytes: bytes, content_type: str, db: AsyncSession)
             id=recognition_id,
             matched_card_id=top_card.id if top_card else None,
             confidence=top_confidence,
-            match_method="claude_vision" if candidates else None,
+            match_method="gemini_vision" if candidates else None,
             image_hash=None,
         )
     )

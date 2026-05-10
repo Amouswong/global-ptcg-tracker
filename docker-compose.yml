@@ -39,6 +39,10 @@ services:
       - POKEMONTCG_API_KEY=${POKEMONTCG_API_KEY:-}
       - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-}
       - VISION_API_ENABLED=${VISION_API_ENABLED:-false}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - SCRYDEX_API_KEY=${SCRYDEX_API_KEY:-}
+      - SCRYDEX_TEAM_ID=${SCRYDEX_TEAM_ID:-}
     depends_on:
       postgres:
         condition: service_healthy

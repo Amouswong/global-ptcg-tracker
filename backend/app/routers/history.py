@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
@@ -6,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.integrations import pricecharting
+from app.integrations import pricecharting, sneakdunk
 from app.models.db.scan_history import ScanHistory
 
 router = APIRouter(prefix="/history", tags=["history"])
@@ -33,7 +34,7 @@ async def add_manual_scan(
     """Manually add a card to scan history (from search)."""
     import httpx
 
-    # Fetch prices from PriceCharting URL if provided
+    # Fetch PriceCharting and Sneakdunk prices concurrently
     ungraded_usd = None
     grade_7_usd = None
     grade_8_usd = None
@@ -49,8 +50,15 @@ async def add_manual_scan(
     psa_10_hkd = None
     bgs_10_hkd = None
     card_image_url = None
+    snkrdunk_result = None
 
-    if req.source_url:
+    async def fetch_pricecharting():
+        nonlocal ungraded_usd, grade_7_usd, grade_8_usd, grade_9_usd
+        nonlocal grade_9_5_usd, psa_10_usd, bgs_10_usd
+        nonlocal ungraded_hkd, grade_7_hkd, grade_8_hkd, grade_9_hkd
+        nonlocal grade_9_5_hkd, psa_10_hkd, bgs_10_hkd, card_image_url
+        if not req.source_url:
+            return
         async with httpx.AsyncClient(timeout=15.0) as client:
             try:
                 result = await pricecharting.fetch_prices_by_url(req.source_url, client)
@@ -63,27 +71,34 @@ async def add_manual_scan(
                     grade_9_5_usd = prices.get("grade_9_5")
                     psa_10_usd = prices.get("psa_10")
                     bgs_10_usd = prices.get("bgs_10")
-
-                    # Convert to HKD
                     hkd_rate = 7.8
-                    if ungraded_usd:
-                        ungraded_hkd = round(ungraded_usd * hkd_rate, 1)
-                    if grade_7_usd:
-                        grade_7_hkd = round(grade_7_usd * hkd_rate, 1)
-                    if grade_8_usd:
-                        grade_8_hkd = round(grade_8_usd * hkd_rate, 1)
-                    if grade_9_usd:
-                        grade_9_hkd = round(grade_9_usd * hkd_rate, 1)
-                    if grade_9_5_usd:
-                        grade_9_5_hkd = round(grade_9_5_usd * hkd_rate, 1)
-                    if psa_10_usd:
-                        psa_10_hkd = round(psa_10_usd * hkd_rate, 1)
-                    if bgs_10_usd:
-                        bgs_10_hkd = round(bgs_10_usd * hkd_rate, 1)
-
+                    if ungraded_usd: ungraded_hkd = round(ungraded_usd * hkd_rate, 1)
+                    if grade_7_usd: grade_7_hkd = round(grade_7_usd * hkd_rate, 1)
+                    if grade_8_usd: grade_8_hkd = round(grade_8_usd * hkd_rate, 1)
+                    if grade_9_usd: grade_9_hkd = round(grade_9_usd * hkd_rate, 1)
+                    if grade_9_5_usd: grade_9_5_hkd = round(grade_9_5_usd * hkd_rate, 1)
+                    if psa_10_usd: psa_10_hkd = round(psa_10_usd * hkd_rate, 1)
+                    if bgs_10_usd: bgs_10_hkd = round(bgs_10_usd * hkd_rate, 1)
                     card_image_url = result.get("card_image_url")
             except Exception:
                 pass
+
+    async def fetch_sneakdunk():
+        nonlocal snkrdunk_result
+        try:
+            # Use Japanese name for JP cards, English otherwise
+            name_ja = req.name if req.language == "ja" else None
+            snkrdunk_result = await sneakdunk.search_card_price(
+                name_en=req.name_en,
+                name_ja=name_ja,
+                number=req.number,
+                set_code=req.set_name,
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("Sneakdunk fetch failed: %s", e)
+
+    await asyncio.gather(fetch_pricecharting(), fetch_sneakdunk())
 
     # Create scan history record
     scan_id = str(uuid.uuid4())
@@ -114,6 +129,11 @@ async def add_manual_scan(
         psa_10_hkd=psa_10_hkd,
         bgs_10_hkd=bgs_10_hkd,
         source_url=req.source_url,
+        sneakdunk_url=snkrdunk_result.get("url") if snkrdunk_result else None,
+        sneakdunk_lowest_ask_jpy=snkrdunk_result.get("lowest_ask_jpy") if snkrdunk_result else None,
+        sneakdunk_lowest_ask_hkd=snkrdunk_result.get("lowest_ask_hkd") if snkrdunk_result else None,
+        sneakdunk_market_price_jpy=snkrdunk_result.get("market_price_jpy") if snkrdunk_result else None,
+        sneakdunk_market_price_hkd=snkrdunk_result.get("market_price_hkd") if snkrdunk_result else None,
         card_image_url=card_image_url,
     )
 
@@ -137,6 +157,11 @@ async def add_manual_scan(
         "grade_9_hkd": record.grade_9_hkd,
         "psa_10_hkd": record.psa_10_hkd,
         "source_url": record.source_url,
+        "sneakdunk_url": record.sneakdunk_url,
+        "sneakdunk_lowest_ask_jpy": record.sneakdunk_lowest_ask_jpy,
+        "sneakdunk_lowest_ask_hkd": record.sneakdunk_lowest_ask_hkd,
+        "sneakdunk_market_price_jpy": record.sneakdunk_market_price_jpy,
+        "sneakdunk_market_price_hkd": record.sneakdunk_market_price_hkd,
         "created_at": record.scanned_at.isoformat() if record.scanned_at else None,
     }
 
@@ -178,6 +203,11 @@ async def get_scan_history(
                 "ungraded_hkd": r.ungraded_hkd,
                 "psa_10_hkd": r.psa_10_hkd,
                 "source_url": r.source_url,
+                "sneakdunk_url": r.sneakdunk_url,
+                "sneakdunk_lowest_ask_jpy": r.sneakdunk_lowest_ask_jpy,
+                "sneakdunk_lowest_ask_hkd": r.sneakdunk_lowest_ask_hkd,
+                "sneakdunk_market_price_jpy": r.sneakdunk_market_price_jpy,
+                "sneakdunk_market_price_hkd": r.sneakdunk_market_price_hkd,
                 "card_image_url": r.card_image_url,
                 "scanned_at": r.scanned_at.isoformat() if r.scanned_at else None,
             }

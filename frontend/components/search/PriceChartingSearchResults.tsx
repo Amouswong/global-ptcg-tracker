@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ExternalLink, Plus, Loader2 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -57,6 +58,7 @@ export function PriceChartingSearchResults({ data, loading, error }: Props) {
   const [selectedCard, setSelectedCard] = useState<PriceChartingResult | null>(null);
   const [selectedGrade, setSelectedGrade] = useState<string>("ungraded");
   const [selectedLanguage, setSelectedLanguage] = useState<string>("jp");
+  const [sneakdunkUrl, setSneakdunkUrl] = useState<string>("");
   const [saving, setSaving] = useState(false);
 
   async function handleSave() {
@@ -99,6 +101,7 @@ export function PriceChartingSearchResults({ data, loading, error }: Props) {
           confidence: 1.0,
           prices: prices,
           source_url: selectedCard.url,
+          sneakdunk_url: sneakdunkUrl.trim() || null,
         }),
       });
 
@@ -108,6 +111,7 @@ export function PriceChartingSearchResults({ data, loading, error }: Props) {
       setSelectedCard(null);
       setSelectedGrade("ungraded");
       setSelectedLanguage("jp");
+      setSneakdunkUrl("");
 
       // Show success message
       alert("Card added to scan history!");
@@ -122,6 +126,7 @@ export function PriceChartingSearchResults({ data, loading, error }: Props) {
     setSelectedCard(result);
     setSelectedGrade("ungraded");
     setSelectedLanguage("jp");
+    setSneakdunkUrl("");
     setDialogOpen(true);
   }
 
@@ -233,6 +238,15 @@ export function PriceChartingSearchResults({ data, loading, error }: Props) {
                   </SelectContent>
                 </Select>
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Sneakdunk URL <span className="text-muted-foreground font-normal">(optional)</span></label>
+              <Input
+                placeholder="https://snkrdunk.com/..."
+                value={sneakdunkUrl}
+                onChange={(e) => setSneakdunkUrl(e.target.value)}
+              />
             </div>
 
             <div className="flex gap-2 justify-end">
