@@ -11,9 +11,13 @@ from typing import Any
 import httpx
 from PIL import Image
 
+import logging
+
 from app.database import AsyncSessionLocal
-from app.integrations import gemini_vision, pricecharting
+from app.integrations import gemini_vision, pricecharting, sneakdunk
 from app.models.schemas.scan import ScannedCard, ScannedCardPrices, ScanResponseSchema
+
+logger = logging.getLogger(__name__)
 
 _FALLBACK_HKD_RATE = 7.83
 _MAX_CARDS_PER_CALL = 8
@@ -216,6 +220,19 @@ async def _save_scan_history(scan_id: str, cards: list[ScannedCard]) -> None:
         records = []
         for card in cards:
             p = card.prices
+            # Fetch Sneakdunk price
+            name_ja = card.name if card.language == "ja" else None
+            sd = None
+            try:
+                sd = await sneakdunk.search_card_price(
+                    name_en=card.name_en,
+                    name_ja=name_ja,
+                    number=card.number,
+                    set_code=card.set_code,
+                )
+            except Exception as e:
+                logger.warning("Sneakdunk fetch failed for %s: %s", card.name_en, e)
+
             record = ScanHistory(
                 id=str(uuid.uuid4()),
                 scan_id=scan_id,
@@ -236,6 +253,11 @@ async def _save_scan_history(scan_id: str, cards: list[ScannedCard]) -> None:
                 psa_10_hkd=p.psa_10_hkd if p else None,
                 source_url=p.source_url if p else None,
                 card_image_url=p.card_image_url if p else None,
+                sneakdunk_url=sd.get("url") if sd else None,
+                sneakdunk_lowest_ask_jpy=sd.get("lowest_ask_jpy") if sd else None,
+                sneakdunk_lowest_ask_hkd=sd.get("lowest_ask_hkd") if sd else None,
+                sneakdunk_market_price_jpy=sd.get("market_price_jpy") if sd else None,
+                sneakdunk_market_price_hkd=sd.get("market_price_hkd") if sd else None,
             )
             records.append(record)
 
@@ -243,7 +265,7 @@ async def _save_scan_history(scan_id: str, cards: list[ScannedCard]) -> None:
             session.add_all(records)
             await session.commit()
     except Exception:
-        pass  # Don't let history saving fail the scan response
+        logger.exception("Failed to save scan history for scan_id=%s", scan_id)
 
 
 async def scan_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> ScanResponseSchema:
