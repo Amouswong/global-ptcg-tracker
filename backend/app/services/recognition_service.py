@@ -28,6 +28,7 @@ async def identify_card(image_bytes: bytes, content_type: str, db: AsyncSession)
         language = vision_result.get("language", "en")
 
         search_tasks = []
+        set_code = vision_result.get("set_code")
 
         # Always search English name via pokemontcg.io
         if name_en:
@@ -39,9 +40,12 @@ async def identify_card(image_bytes: bytes, content_type: str, db: AsyncSession)
         if language == "ja" and name_orig:
             search_tasks.append(_tcgdex_search(name_orig, db))
 
-        # If we have a card number, search by number too
+        # Search by number — for Japanese cards use TCGdex ja endpoint
         if number and tcgdex.looks_like_number(number):
-            search_tasks.append(_number_search(number, db))
+            if language == "ja":
+                search_tasks.append(_number_search_ja(number, set_code, db))
+            else:
+                search_tasks.append(_number_search(number, db))
 
         results = await asyncio.gather(*search_tasks, return_exceptions=True)
 
@@ -81,13 +85,14 @@ async def identify_card(image_bytes: bytes, content_type: str, db: AsyncSession)
         try:
             language = vision_result.get("language", "en")
             name_ja = vision_result.get("name") if language == "ja" else None
+            set_code = vision_result.get("set_code")
             sd = None
             try:
                 sd = await sneakdunk.search_card_price(
                     name_en=top_card.name,
                     name_ja=name_ja,
                     number=top_card.number,
-                    set_code=None,
+                    set_code=set_code,
                 )
             except Exception as e:
                 logger.warning("Sneakdunk fetch failed for %s: %s", top_card.name, e)
@@ -101,7 +106,9 @@ async def identify_card(image_bytes: bytes, content_type: str, db: AsyncSession)
                 number=top_card.number,
                 language=language,
                 rarity=top_card.rarity,
-                graded=False,
+                graded=bool(vision_result.get("graded", False)),
+                grade_company=vision_result.get("grade_company"),
+                grade_value=vision_result.get("grade_value"),
                 confidence=top_confidence,
                 card_image_url=top_card.image_url_small,
                 sneakdunk_url=sd.get("url") if sd else None,
@@ -143,3 +150,35 @@ async def _tcgdex_search(name: str, db: AsyncSession) -> list[CardSummarySchema]
 async def _number_search(number: str, db: AsyncSession) -> list[CardSummarySchema]:
     result = await card_service.search_cards(number, 1, 5, db)
     return list(result.results)
+
+
+async def _number_search_ja(number: str, set_code: str | None, db: AsyncSession) -> list[CardSummarySchema]:
+    """Search TCGdex Japanese cards by number, optionally filtered by set."""
+    data = await tcgdex.search_by_number(number, lang="ja")
+    cards = []
+    for card_data in data["cards"]:
+        # If we have a set_code, prefer cards whose set_id matches
+        if set_code and card_data.get("set_id", "").lower() != set_code.lower():
+            continue
+        await card_service._upsert_card(card_data, db)
+        cards.append(CardSummarySchema(
+            id=card_data["id"],
+            name=card_data["name"],
+            set_name=card_data.get("set_name", ""),
+            number=card_data.get("number"),
+            rarity=card_data.get("rarity"),
+            image_url_small=card_data.get("image_url_small"),
+        ))
+    # Fall back to unfiltered results if set filter returned nothing
+    if not cards and set_code:
+        for card_data in data["cards"]:
+            await card_service._upsert_card(card_data, db)
+            cards.append(CardSummarySchema(
+                id=card_data["id"],
+                name=card_data["name"],
+                set_name=card_data.get("set_name", ""),
+                number=card_data.get("number"),
+                rarity=card_data.get("rarity"),
+                image_url_small=card_data.get("image_url_small"),
+            ))
+    return cards
